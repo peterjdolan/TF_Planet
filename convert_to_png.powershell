@@ -1,0 +1,22 @@
+function ConvertTo-Png
+{
+    [cmdletbinding()]
+    param([Parameter(Mandatory=$true, ValueFromPipeline = $true)] $Path)
+
+    process{
+        if ($Path -is [string])
+        { $Path = get-childitem $Path }
+
+        $Path | foreach {
+            $image = [System.Drawing.Image]::FromFile($($_.FullName));
+            $FilePath = [IO.Path]::ChangeExtension($_.FullName, '.png');
+            $image.Save($FilePath, [System.Drawing.Imaging.ImageFormat]::Png);
+            $image.Dispose();
+        }
+    }
+
+ }
+ 
+ 
+ 
+ # Use as: Get-ChildItem *.jpg | ConvertTo-Png
