@@ -10,6 +10,8 @@ import argparse
 tf.logging.set_verbosity(tf.logging.INFO)
 FLAGS = None
 
+IMG_DIM = 256
+
 def read_data_labels():
   """Reads the data labels from the 'train.csv' file, and returns processed
   and split dataframes.
@@ -67,10 +69,9 @@ def make_input_fn(input_df, batch_size=10, num_epochs=20):
     # Transform the filenames tensor into a decoded JPEG tensor, reading
     # from disk as we go.
     file_content = tf.read_file(input_queue[0])
-    image = tf.image.decode_jpeg(file_content, channels=3)
-    tf.summary.image("Raw image", image, max_outputs=20)
+    image = tf.image.decode_image(file_content, channels=3)
     image = tf.image.convert_image_dtype(image, dtype=tf.float32)
-    image.set_shape([256, 256, 3])
+    image.set_shape([IMG_DIM, IMG_DIM, 3])
 
     filenames = input_queue[0]
     labels = input_queue[1]
@@ -83,32 +84,50 @@ def make_input_fn(input_df, batch_size=10, num_epochs=20):
   return input_fn
 
 
+def summarize_convolution(convolution, width, height, channels, filters, name):
+  # Concatenate the filters into one image
+  # We start with [N, width, height, channels * filters], ordered by channel first, then by filter
+  # We want to get to [N*filters, width, height, channels]
+  # So, we first split by channels on the last dimension
+  # Then we concatenate back together on the first dimension.
+  splits = tf.split(convolution, filters, axis=3) # list of [N, width, height, channels]
+  merged = tf.concat(splits, 0)
+  tf.summary.image(name, merged, max_outputs=200)
+
 def model_fn(features, target):
   # Transform our target into a one-hot encoding of 
   # TRUE and FALSE categories.
-  tf.summary.histogram("Target histogram", target)
+  tf.summary.histogram("target_histogram", target)
   target = tf.one_hot(target, 2)
 
-  net = tf.reshape(features["image"], (-1, 256, 256, 3))
-  tf.summary.image("Input images", net, max_outputs=20)
-  tf.summary.histogram("Input image histogram", net)
+  net = tf.reshape(features["image"], (-1, IMG_DIM, IMG_DIM, 3))
+  tf.summary.histogram("input_image_histogram", net)
 
   net = layers.repeat(net, 2, layers.conv2d, 64, [3, 3], scope='conv1')
+  summarize_convolution(net, IMG_DIM, IMG_DIM, 1, 64, "conv1")
   net = layers.max_pool2d(net, [2, 2], scope='pool1')
+
   net = layers.repeat(net, 2, layers.conv2d, 128, [3, 3], scope='conv2')
+  summarize_convolution(net, IMG_DIM/2, IMG_DIM/2, 1, 128, "conv2")
   net = layers.max_pool2d(net, [2, 2], scope='pool2')
+
   net = layers.repeat(net, 3, layers.conv2d, 256, [3, 3], scope='conv3')
+  summarize_convolution(net, IMG_DIM/4, IMG_DIM/8, 1, 256, "conv3")
   net = layers.max_pool2d(net, [2, 2], scope='pool3')
+
   net = layers.repeat(net, 3, layers.conv2d, 512, [3, 3], scope='conv4')
+  summarize_convolution(net, IMG_DIM/8, IMG_DIM/8, 1, 512, "conv4")
   net = layers.max_pool2d(net, [2, 2], scope='pool4')
+
   net = layers.repeat(net, 3, layers.conv2d, 512, [3, 3], scope='conv5')
+  summarize_convolution(net, IMG_DIM/16, IMG_DIM/16, 1, 512, "conv5")
   net = layers.max_pool2d(net, [2, 2], scope='pool5')
 
   net = layers.flatten(net, scope='flatten5')
   net = layers.fully_connected(net, 4096, scope='fc6')
-  net = tf.nn.dropout(net, 0.5)
+  net = tf.nn.dropout(net, 0.2)
   net = layers.fully_connected(net, 4096, scope='fc7')
-  net = tf.nn.dropout(net, 0.5)
+  net = tf.nn.dropout(net, 0.2)
   net = layers.fully_connected(net, 1000, scope='fc8')
   
   prediction, loss = tf.contrib.learn.models.logistic_regression_zero_init(net, target)
@@ -143,7 +162,7 @@ def train():
                     metric_fn=tf.contrib.metrics.streaming_recall,
                     prediction_key="classes"),
         },
-      early_stopping_rounds=5000,
+      early_stopping_rounds=(5000 if FLAGS.early_stopping else None),
       early_stopping_metric="accuracy",
       early_stopping_metric_minimize=True)
   classifier.fit(input_fn=make_input_fn(train_df, batch_size=FLAGS.batch_size),
@@ -154,7 +173,9 @@ def train():
 
 
 def main(argv):
-  train()
+  with tf.Session():
+    with tf.device(FLAGS.device):
+      train()
 
 
 if __name__ == "__main__":
@@ -186,16 +207,24 @@ if __name__ == "__main__":
                       default=5, 
                       help='Batch size for training and evaluation')
   parser.add_argument('--train_steps', 
-                      type=int, 
-                      default=10000, 
+                      type=int,
+                      default=10000,
                       help='Number of training steps')
   parser.add_argument('--eval_steps', 
-                      type=int, 
-                      default=100, 
+                      type=int,
+                      default=100,
                       help='Number of test steps')
   parser.add_argument('--eval_every_n_steps', 
-                      type=int, 
-                      default=500, 
+                      type=int,
+                      default=500,
                       help='Number of training steps between testing')
+  parser.add_argument('--early_stopping',
+                      type=bool,
+                      default=False,
+                      help='Enable or disable early stopping, when accuracy hasn\'t changed for more than 5000 steps.')
+  parser.add_argument('--device',
+                      type=str,
+                      default='/gpu:0',
+                      help='The device to run on.')
   FLAGS, unparsed = parser.parse_known_args()
   tf.app.run(main=main, argv=[sys.argv[0]] + unparsed)
