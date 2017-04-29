@@ -171,12 +171,12 @@ def summarize_convolution(net, dimension, name):
   # Here we assume that the convolution kernels are single-channel
   by_channel = tf.reshape(squeezed, [dimension, dimension, 1, -1])
   grid = put_kernels_on_grid(by_channel, name)
-  tf.summary.image(name, grid)
+  tf.summary.image(name, grid, max_outputs=1)
 
 
 def model_fn(features, target):
   net = tf.reshape(features["image"], (-1, IMG_DIM, IMG_DIM, 3))
-  tf.summary.image('features', net)
+  tf.summary.image('features', net, max_outputs=1)
   tf.summary.histogram("features_histogram", net)
 
   net = layers.repeat(net, 2, layers.conv2d, 64, [3, 3], scope='conv1')
@@ -224,7 +224,10 @@ def train():
   
   classifier = tf.contrib.learn.Estimator(
     model_fn=model_fn,
-    model_dir=os.path.join(FLAGS.model_basedir, datetime.datetime.now().strftime("%y-%m-%d-%H.%M")))
+    model_dir=os.path.join(FLAGS.model_basedir, datetime.datetime.now().strftime("%y-%m-%d-%H.%M")),
+    config=tf.contrib.learn.RunConfig(
+        save_checkpoints_secs=60,
+        save_summary_steps=100))
   
   validation_monitor = tf.contrib.learn.monitors.ValidationMonitor(
       input_fn=make_input_fn(test_df, batch_size=FLAGS.batch_size),
