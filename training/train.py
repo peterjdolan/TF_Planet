@@ -201,15 +201,16 @@ def model_fn(features, target):
 
   net = layers.flatten(net, scope='flatten5')
   net = layers.fully_connected(net, 4096, scope='fc6')
-  net = tf.nn.dropout(net, 0.2)
+  net = tf.nn.dropout(net, FLAGS.dropout_probability)
   net = layers.fully_connected(net, 4096, scope='fc7')
-  net = tf.nn.dropout(net, 0.2)
+  net = tf.nn.dropout(net, FLAGS.dropout_probability)
   net = layers.fully_connected(net, 1000, scope='fc8')
-  net = tf.nn.dropout(net, 0.2)
-  
+  net = tf.nn.dropout(net, FLAGS.dropout_probability)
+
   # The final layer, which stores the (not present) - (present) binary pairs
   # for each label in the vocabulary
   prediction = layers.fully_connected(net, N_CLASSES * 2, scope='pred')
+  tf.summary.histogram("predictions", prediction)
   
   loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(logits=prediction,
                                                                 labels=target))
@@ -277,6 +278,10 @@ if __name__ == "__main__":
                       type=float, 
                       default=0.1, 
                       help='Learning rate')
+  parser.add_argument('--dropout_probability',
+                      type=float,
+                      default=0.2,
+                      help='Dropout probability')
   # On a GTX 1060 with 6G RAM, a batch size of 10 started to slow down the main computer. There
   # didn't seem to be much affect on images / second pushed through the system.
   parser.add_argument('--batch_size', 
